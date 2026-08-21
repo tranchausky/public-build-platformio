@@ -126,6 +126,68 @@
             word-break: break-all;
         }
 
+        .readme-panel {
+            overflow: hidden;
+        }
+
+        .readme-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .readme-header h3 {
+            margin: 0;
+        }
+
+        .readme-content {
+            line-height: 1.6;
+            overflow-wrap: anywhere;
+        }
+
+        .readme-content pre {
+            overflow-x: auto;
+            padding: 14px;
+            border-radius: 7px;
+            background: #f5f5f5;
+            border: 1px solid #e6e6e6;
+        }
+
+        .readme-content code {
+            font-family: Consolas, Monaco, monospace;
+            background: #f5f5f5;
+            padding: 2px 5px;
+            border-radius: 4px;
+        }
+
+        .readme-content pre code {
+            padding: 0;
+            background: transparent;
+        }
+
+        .readme-content table {
+            border-collapse: collapse;
+            width: 100%;
+            display: block;
+            overflow-x: auto;
+        }
+
+        .readme-content th,
+        .readme-content td {
+            border: 1px solid #ddd;
+            padding: 8px 10px;
+            text-align: left;
+        }
+
+        .readme-content blockquote {
+            margin-left: 0;
+            padding-left: 14px;
+            border-left: 4px solid #ddd;
+            color: #666;
+        }
+
         @media (max-width: 650px) {
             body { margin: 10px auto; padding: 12px; }
             .folder-row { flex-direction: column; }
@@ -151,6 +213,7 @@
 </div>
 
 <div id="projectInfo"></div>
+<div id="readmeContainer"></div>
 <div id="buildList"></div>
 
 <script>
@@ -305,7 +368,41 @@ async function deleteProject(folder) {
 
 function clearBuilds() {
     document.getElementById('projectInfo').innerHTML = '';
+    document.getElementById('readmeContainer').innerHTML = '';
     document.getElementById('buildList').innerHTML = '';
+}
+
+async function loadReadme() {
+    const container = document.getElementById('readmeContainer');
+    container.innerHTML = '';
+
+    const response = await fetch('/api/readme');
+    const result = await response.json();
+
+    if (!response.ok || !result.success || !result.exists) {
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="panel readme-panel">
+            <div class="readme-header">
+                <h3>${escapeHtml(result.filename || 'README.md')}</h3>
+                <button type="button" onclick="toggleReadme()">Hide / Show</button>
+            </div>
+            <div id="readmeContent" class="readme-content">${result.html}</div>
+        </div>
+    `;
+
+    container.querySelectorAll('a').forEach(link => {
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+    });
+}
+
+function toggleReadme() {
+    const content = document.getElementById('readmeContent');
+    if (!content) return;
+    content.hidden = !content.hidden;
 }
 
 async function loadBuilds() {
@@ -329,6 +426,8 @@ async function loadBuilds() {
             <span class="muted">${escapeHtml(result.project)}</span>
         </div>
     `;
+
+    await loadReadme();
 
     if (!result.builds.length) {
         container.innerHTML = '<div class="panel">No PlatformIO builds found in <code>.pio/build</code>.</div>';
