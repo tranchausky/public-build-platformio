@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Local Installer</title>
+
+    <script
+        type="module"
+        src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module">
+    </script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f4f4f4;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+        }
+
+        .project-box,
+        .build {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: calc(100% - 130px);
+            min-width: 300px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 18px;
+            cursor: pointer;
+        }
+
+        .file {
+            font-family: monospace;
+            margin: 6px 0;
+        }
+
+        .chip,
+        .size {
+            color: #777;
+        }
+
+        .install-btn {
+            margin-top: 15px;
+        }
+
+        .message {
+            margin: 12px 0;
+        }
+    </style>
+</head>
+<body>
+
+<h1>ESP32 Firmware Installer</h1>
+
+<div class="project-box">
+    <h3>Project Folder</h3>
+
+    <input
+        id="projectFolder"
+        placeholder="D:\Projects\ESP32\MyProject">
+
+    <button type="button" onclick="saveProject()">
+        Load
+    </button>
+
+    <div id="message" class="message"></div>
+</div>
+
+<div id="projectInfo"></div>
+<div id="buildList"></div>
+
+<script>
+async function loadConfig() {
+    const response = await fetch('/api/config');
+    const config = await response.json();
+
+    if (config.lastProject) {
+        document.getElementById('projectFolder').value = config.lastProject;
+        await loadBuilds();
+    }
+}
+
+async function saveProject() {
+    const folder = document.getElementById('projectFolder').value.trim();
+    const message = document.getElementById('message');
+
+    message.textContent = '';
+
+    const response = await fetch('/api/project', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ folder })
+    });
+
+    const result = await response.json();
+
+    if (!result.success) {
+        message.textContent = result.message || 'Unable to load project.';
+        return;
+    }
+
+    message.textContent = 'Project loaded.';
+    await loadBuilds();
+}
+
+function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+async function loadBuilds() {
+    const response = await fetch('/api/builds');
+    const result = await response.json();
+
+    const container = document.getElementById('buildList');
+    const projectInfo = document.getElementById('projectInfo');
+
+    container.innerHTML = '';
+    projectInfo.innerHTML = '';
+
+    if (!result.success) {
+        container.innerHTML = `<p>${escapeHtml(result.message)}</p>`;
+        return;
+    }
+
+    projectInfo.innerHTML = `
+        <div class="project-box">
+            <strong>Project:</strong>
+            ${escapeHtml(result.project)}
+        </div>
+    `;
+
+    if (!result.builds.length) {
+        container.innerHTML = '<p>No PlatformIO builds found in .pio/build.</p>';
+        return;
+    }
+
+    result.builds.forEach(build => {
+        const div = document.createElement('div');
+        div.className = 'build';
+
+        const filesHtml = build.files.map(file => `
+            <div class="file">
+                ${escapeHtml(file.name)}
+                <span class="size">${formatBytes(file.size)}</span>
+            </div>
+        `).join('');
+
+        const env = encodeURIComponent(build.environment);
+
+        div.innerHTML = `
+            <h2>${escapeHtml(build.environment)}</h2>
+            <div class="chip">${escapeHtml(build.chipFamily)}</div>
+            <hr>
+            ${filesHtml}
+
+            <div class="install-btn">
+                <esp-web-install-button manifest="/api/manifest/${env}">
+                    <button slot="activate">Install ESP32</button>
+                </esp-web-install-button>
+            </div>
+        `;
+
+        container.appendChild(div);
+    });
+}
+
+loadConfig();
+</script>
+
+</body>
+</html>
