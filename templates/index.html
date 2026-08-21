@@ -5,43 +5,108 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Local Installer</title>
 
-    <script
-        type="module"
-        src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module">
-    </script>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
 
     <style>
+        * { box-sizing: border-box; }
+
         body {
             font-family: Arial, sans-serif;
-            max-width: 900px;
+            max-width: 1000px;
             margin: 40px auto;
             padding: 20px;
             background: #f4f4f4;
+            color: #222;
         }
 
-        h1 {
-            margin-bottom: 30px;
-        }
+        h1 { margin-bottom: 24px; }
+        h2, h3 { margin-top: 0; }
 
-        .project-box,
-        .build {
+        .panel,
+        .build,
+        .bookmark {
             background: white;
             padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            border-radius: 10px;
+            margin-bottom: 18px;
+        }
+
+        .folder-row {
+            display: flex;
+            gap: 10px;
         }
 
         input {
-            width: calc(100% - 130px);
-            min-width: 300px;
-            padding: 10px;
-            box-sizing: border-box;
+            flex: 1;
+            min-width: 0;
+            padding: 11px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
         }
 
         button {
-            padding: 10px 18px;
+            padding: 10px 16px;
             cursor: pointer;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            background: #fff;
         }
+
+        button:hover { background: #f2f2f2; }
+
+        .primary {
+            background: #222;
+            color: #fff;
+            border-color: #222;
+        }
+
+        .primary:hover { background: #444; }
+
+        .danger {
+            border-color: #d8a2a2;
+        }
+
+        .bookmark-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+        }
+
+        .bookmark {
+            margin: 0;
+            padding: 16px;
+            border: 1px solid #ddd;
+        }
+
+        .bookmark.active {
+            border: 2px solid #222;
+        }
+
+        .bookmark.invalid {
+            opacity: 0.65;
+        }
+
+        .bookmark-name {
+            font-weight: bold;
+            font-size: 17px;
+            margin-bottom: 7px;
+        }
+
+        .bookmark-path {
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            color: #666;
+            min-height: 32px;
+        }
+
+        .bookmark-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .bookmark-actions button:first-child { flex: 1; }
 
         .file {
             font-family: monospace;
@@ -49,16 +114,21 @@
         }
 
         .chip,
-        .size {
+        .size,
+        .muted {
             color: #777;
         }
 
-        .install-btn {
-            margin-top: 15px;
+        .install-btn { margin-top: 15px; }
+        .message { margin-top: 12px; min-height: 20px; }
+
+        .active-project {
+            word-break: break-all;
         }
 
-        .message {
-            margin: 12px 0;
+        @media (max-width: 650px) {
+            body { margin: 10px auto; padding: 12px; }
+            .folder-row { flex-direction: column; }
         }
     </style>
 </head>
@@ -66,57 +136,33 @@
 
 <h1>ESP32 Firmware Installer</h1>
 
-<div class="project-box">
-    <h3>Project Folder</h3>
+<div class="panel">
+    <h3>Add Project Folder</h3>
+    <div class="folder-row">
+        <input id="projectFolder" placeholder="/home/user/esp32/my-project">
+        <button class="primary" type="button" onclick="saveProject()">Save & Load</button>
+    </div>
+    <div id="message" class="message muted"></div>
+</div>
 
-    <input
-        id="projectFolder"
-        placeholder="D:\Projects\ESP32\MyProject">
-
-    <button type="button" onclick="saveProject()">
-        Load
-    </button>
-
-    <div id="message" class="message"></div>
+<div class="panel">
+    <h3>Saved Projects</h3>
+    <div id="bookmarkList" class="bookmark-list"></div>
 </div>
 
 <div id="projectInfo"></div>
 <div id="buildList"></div>
 
 <script>
-async function loadConfig() {
-    const response = await fetch('/api/config');
-    const config = await response.json();
+let currentProject = '';
 
-    if (config.lastProject) {
-        document.getElementById('projectFolder').value = config.lastProject;
-        await loadBuilds();
-    }
-}
-
-async function saveProject() {
-    const folder = document.getElementById('projectFolder').value.trim();
-    const message = document.getElementById('message');
-
-    message.textContent = '';
-
-    const response = await fetch('/api/project', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ folder })
-    });
-
-    const result = await response.json();
-
-    if (!result.success) {
-        message.textContent = result.message || 'Unable to load project.';
-        return;
-    }
-
-    message.textContent = 'Project loaded.';
-    await loadBuilds();
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
 }
 
 function formatBytes(bytes) {
@@ -126,13 +172,140 @@ function formatBytes(bytes) {
     return (bytes / 1024 / 1024).toFixed(2) + ' MB';
 }
 
-function escapeHtml(value) {
-    return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
+function showMessage(text) {
+    document.getElementById('message').textContent = text || '';
+}
+
+async function refreshProjects(loadCurrent = false) {
+    const response = await fetch('/api/config');
+    const config = await response.json();
+
+    currentProject = config.lastProject || '';
+    renderBookmarks(config.projects || []);
+
+    if (loadCurrent && currentProject) {
+        document.getElementById('projectFolder').value = currentProject;
+        await loadBuilds();
+    } else if (!currentProject) {
+        clearBuilds();
+    }
+}
+
+function renderBookmarks(projects) {
+    const list = document.getElementById('bookmarkList');
+
+    if (!projects.length) {
+        list.innerHTML = '<div class="muted">No saved projects yet.</div>';
+        return;
+    }
+
+    list.innerHTML = projects.map(project => `
+        <div class="bookmark ${project.active ? 'active' : ''} ${project.exists ? '' : 'invalid'}">
+            <div class="bookmark-name">
+                ${escapeHtml(project.name)}
+                ${project.active ? '<span class="muted"> · active</span>' : ''}
+            </div>
+            <div class="bookmark-path">${escapeHtml(project.folder)}</div>
+            ${project.exists ? '' : '<div class="muted">Folder not found on server</div>'}
+            <div class="bookmark-actions">
+                <button
+                    type="button"
+                    ${project.exists ? '' : 'disabled'}
+                    onclick='selectProject(${JSON.stringify(project.folder)})'>
+                    Load
+                </button>
+                <button
+                    class="danger"
+                    type="button"
+                    onclick='deleteProject(${JSON.stringify(project.folder)})'>
+                    Delete
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function saveProject() {
+    const folder = document.getElementById('projectFolder').value.trim();
+    showMessage('');
+
+    const response = await fetch('/api/project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        showMessage(result.message || 'Unable to save project.');
+        return;
+    }
+
+    document.getElementById('projectFolder').value = result.project;
+    showMessage('Project saved on server.');
+    await refreshProjects(false);
+    await loadBuilds();
+}
+
+async function selectProject(folder) {
+    showMessage('');
+
+    const response = await fetch('/api/project/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        showMessage(result.message || 'Unable to load project.');
+        await refreshProjects(false);
+        return;
+    }
+
+    document.getElementById('projectFolder').value = result.project;
+    showMessage('Project loaded.');
+    await refreshProjects(false);
+    await loadBuilds();
+}
+
+async function deleteProject(folder) {
+    const projectName = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
+
+    if (!confirm(`Delete bookmark "${projectName}"?\n\nThis only removes it from the list. Project files will NOT be deleted.`)) {
+        return;
+    }
+
+    const response = await fetch('/api/project', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+        showMessage(result.message || 'Unable to delete bookmark.');
+        return;
+    }
+
+    showMessage('Bookmark deleted. Project files were not touched.');
+    await refreshProjects(false);
+
+    if (result.lastProject) {
+        document.getElementById('projectFolder').value = result.lastProject;
+        await loadBuilds();
+    } else {
+        document.getElementById('projectFolder').value = '';
+        clearBuilds();
+    }
+}
+
+function clearBuilds() {
+    document.getElementById('projectInfo').innerHTML = '';
+    document.getElementById('buildList').innerHTML = '';
 }
 
 async function loadBuilds() {
@@ -146,19 +319,19 @@ async function loadBuilds() {
     projectInfo.innerHTML = '';
 
     if (!result.success) {
-        container.innerHTML = `<p>${escapeHtml(result.message)}</p>`;
+        container.innerHTML = `<div class="panel muted">${escapeHtml(result.message)}</div>`;
         return;
     }
 
     projectInfo.innerHTML = `
-        <div class="project-box">
-            <strong>Project:</strong>
-            ${escapeHtml(result.project)}
+        <div class="panel active-project">
+            <strong>Active:</strong> ${escapeHtml(result.projectName)}<br>
+            <span class="muted">${escapeHtml(result.project)}</span>
         </div>
     `;
 
     if (!result.builds.length) {
-        container.innerHTML = '<p>No PlatformIO builds found in .pio/build.</p>';
+        container.innerHTML = '<div class="panel">No PlatformIO builds found in <code>.pio/build</code>.</div>';
         return;
     }
 
@@ -180,10 +353,9 @@ async function loadBuilds() {
             <div class="chip">${escapeHtml(build.chipFamily)}</div>
             <hr>
             ${filesHtml}
-
             <div class="install-btn">
                 <esp-web-install-button manifest="/api/manifest/${env}">
-                    <button slot="activate">Install ESP32</button>
+                    <button class="primary" slot="activate">Install ESP32</button>
                 </esp-web-install-button>
             </div>
         `;
@@ -192,7 +364,7 @@ async function loadBuilds() {
     });
 }
 
-loadConfig();
+refreshProjects(true);
 </script>
 
 </body>
