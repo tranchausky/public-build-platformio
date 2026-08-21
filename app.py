@@ -16,14 +16,25 @@ ALLOWED_FILES = {
 }
 
 
+def default_config():
+    return {"projects": [], "lastProject": ""}
+
+
 def load_config():
     if not CONFIG_FILE.exists():
-        return {"projects": [], "lastProject": ""}
+        return default_config()
 
     try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        config = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
     except Exception:
-        return {"projects": [], "lastProject": ""}
+        return default_config()
+
+    if not isinstance(config.get("projects"), list):
+        config["projects"] = []
+    if not isinstance(config.get("lastProject"), str):
+        config["lastProject"] = ""
+
+    return config
 
 
 def save_config(config):
@@ -31,6 +42,25 @@ def save_config(config):
         json.dumps(config, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def normalize_folder(folder):
+    return str(Path(folder).expanduser().resolve())
+
+
+def validate_project_folder(folder):
+    if not folder:
+        return None, "Folder is required"
+
+    project_path = Path(folder).expanduser()
+
+    if not project_path.exists():
+        return None, "Folder does not exist"
+
+    if not project_path.is_dir():
+        return None, "Path is not a folder"
+
+    return project_path.resolve(), None
 
 
 def get_current_project():
@@ -107,28 +137,34 @@ def index():
 
 @app.route("/api/config")
 def get_config():
-    return jsonify(load_config())
+    config = load_config()
+
+    projects = []
+    for folder in config.get("projects", []):
+        path = Path(folder)
+        projects.append({
+            "folder": folder,
+            "name": path.name or folder,
+            "exists": path.exists() and path.is_dir(),
+            "active": folder == config.get("lastProject", ""),
+        })
+
+    return jsonify({
+        "projects": projects,
+        "lastProject": config.get("lastProject", ""),
+    })
 
 
 @app.route("/api/project", methods=["POST"])
-def set_project():
+def add_or_select_project():
     data = request.get_json(silent=True) or {}
     folder = data.get("folder", "").strip()
 
-    if not folder:
-        return jsonify({"success": False, "message": "Folder is required"}), 400
+    project_path, error = validate_project_folder(folder)
+    if error:
+        return jsonify({"success": False, "message": error}), 400
 
-    project_path = Path(folder).expanduser()
-
-    if not project_path.exists():
-        return jsonify({"success": False, "message": "Folder does not exist"}), 400
-
-    if not project_path.is_dir():
-        return jsonify({"success": False, "message": "Path is not a folder"}), 400
-
-    project_path = project_path.resolve()
     folder = str(project_path)
-
     config = load_config()
     projects = config.get("projects", [])
 
@@ -139,7 +175,66 @@ def set_project():
     config["lastProject"] = folder
     save_config(config)
 
-    return jsonify({"success": True, "project": folder})
+    return jsonify({
+        "success": True,
+        "project": folder,
+        "name": project_path.name or folder,
+    })
+
+
+@app.route("/api/project/select", methods=["POST"])
+def select_project():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+
+    config = load_config()
+    projects = config.get("projects", [])
+
+    if folder not in projects:
+        return jsonify({"success": False, "message": "Project is not bookmarked"}), 404
+
+    project_path, error = validate_project_folder(folder)
+    if error:
+        return jsonify({"success": False, "message": error}), 400
+
+    resolved = str(project_path)
+
+    if resolved != folder:
+        projects = [resolved if item == folder else item for item in projects]
+        config["projects"] = projects
+
+    config["lastProject"] = resolved
+    save_config(config)
+
+    return jsonify({"success": True, "project": resolved})
+
+
+@app.route("/api/project", methods=["DELETE"])
+def delete_project():
+    data = request.get_json(silent=True) or {}
+    folder = data.get("folder", "").strip()
+
+    if not folder:
+        return jsonify({"success": False, "message": "Folder is required"}), 400
+
+    config = load_config()
+    projects = config.get("projects", [])
+
+    if folder not in projects:
+        return jsonify({"success": False, "message": "Project is not bookmarked"}), 404
+
+    projects.remove(folder)
+    config["projects"] = projects
+
+    if config.get("lastProject") == folder:
+        config["lastProject"] = projects[0] if projects else ""
+
+    save_config(config)
+
+    return jsonify({
+        "success": True,
+        "lastProject": config.get("lastProject", ""),
+    })
 
 
 @app.route("/api/builds")
@@ -149,13 +244,14 @@ def get_builds():
     if not project:
         return jsonify({
             "success": False,
-            "message": "No project selected",
+            "message": "No valid project selected",
             "builds": [],
         })
 
     return jsonify({
         "success": True,
         "project": str(project),
+        "projectName": project.name or str(project),
         "builds": scan_builds(project),
     })
 
