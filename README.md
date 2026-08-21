@@ -10,6 +10,7 @@ Local ESP32 PlatformIO firmware installer using Flask + ESP Web Tools.
 - Remembers the last active project across restarts
 - Exposes only the allowed firmware `.bin` files
 - Uses ESP Web Tools 10.1.1 for flashing
+- Automatically detects and renders a root-level `README.md` for the active project
 
 ## Install
 

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file, abort
+import bleach
+import markdown
 
 app = Flask(__name__)
 
@@ -75,6 +77,35 @@ def get_current_project():
         return None
 
     return project_path
+
+
+def find_readme(project_path):
+    for item in project_path.iterdir():
+        if item.is_file() and item.name.lower() == "readme.md":
+            return item
+    return None
+
+
+def render_readme(readme_path):
+    raw = readme_path.read_text(encoding="utf-8", errors="replace")
+    rendered = markdown.markdown(
+        raw,
+        extensions=["fenced_code", "tables", "sane_lists"],
+    )
+
+    allowed_tags = set(bleach.sanitizer.ALLOWED_TAGS).union({
+        "p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6",
+        "hr", "br", "table", "thead", "tbody", "tr", "th", "td",
+        "ul", "ol", "li", "blockquote", "strong", "em", "del",
+    })
+
+    return bleach.clean(
+        rendered,
+        tags=allowed_tags,
+        attributes={"a": ["href", "title"]},
+        protocols={"http", "https", "mailto"},
+        strip=True,
+    )
 
 
 def detect_chip_family(env_name):
@@ -234,6 +265,42 @@ def delete_project():
     return jsonify({
         "success": True,
         "lastProject": config.get("lastProject", ""),
+    })
+
+
+@app.route("/api/readme")
+def get_readme():
+    project = get_current_project()
+
+    if not project:
+        return jsonify({
+            "success": False,
+            "exists": False,
+            "message": "No valid project selected",
+        })
+
+    readme_path = find_readme(project)
+
+    if not readme_path:
+        return jsonify({
+            "success": True,
+            "exists": False,
+        })
+
+    try:
+        html = render_readme(readme_path)
+    except OSError:
+        return jsonify({
+            "success": False,
+            "exists": False,
+            "message": "Unable to read README.md",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "exists": True,
+        "filename": readme_path.name,
+        "html": html,
     })
 
 
